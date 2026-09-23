@@ -391,24 +391,12 @@ func publishCacheWithBeforeMarker(
 	if err != nil {
 		return fmt.Errorf("encode committed cache sync state: %w", err)
 	}
-	return commitCacheMarker(analyticsDir, staging.buildID, stateData)
+	return commitCacheMarker(analyticsDir, stateData)
 }
 
-func commitCacheMarker(analyticsDir, buildID string, stateData []byte) error {
-	statePath := query.CacheStatePath(analyticsDir)
-	tempPath := filepath.Join(analyticsDir, ".last-sync-"+buildID+".tmp")
-	if err := buildCacheWriteStateFile(tempPath, stateData, 0o600); err != nil {
-		return fmt.Errorf("write staged cache marker: %w", err)
-	}
-	defer func() { _ = os.Remove(tempPath) }()
-	if err := syncFile(tempPath); err != nil {
-		return fmt.Errorf("sync staged cache marker: %w", err)
-	}
-	if err := os.Rename(tempPath, statePath); err != nil {
+func commitCacheMarker(analyticsDir string, stateData []byte) error {
+	if err := buildCacheWriteStateFile(query.CacheStatePath(analyticsDir), stateData, 0o600); err != nil {
 		return fmt.Errorf("commit cache marker: %w", err)
-	}
-	if err := syncDirectory(analyticsDir); err != nil {
-		return fmt.Errorf("sync committed cache marker: %w", err)
 	}
 	return nil
 }

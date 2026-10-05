@@ -180,18 +180,36 @@ func TestWindowsRetainedAuthorityAllowsMissingPublication(t *testing.T) {
 }
 
 func TestWindowsAuthorityRejectsPreexistingDirectoryWriter(t *testing.T) {
-	parent := filepath.Join(t.TempDir(), "config")
+	ancestor := t.TempDir()
+	parent := filepath.Join(ancestor, "config")
 	require.NoError(t, os.Mkdir(parent, 0o700))
-	encoded, err := windows.UTF16PtrFromString(parent)
-	require.NoError(t, err)
-	writer, err := windows.CreateFile(encoded, windows.GENERIC_WRITE,
-		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
-		nil, windows.OPEN_EXISTING,
-		windows.FILE_FLAG_OPEN_REPARSE_POINT|windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, windows.CloseHandle(writer)) })
+	openWriter := func(path string) {
+		encoded, err := windows.UTF16PtrFromString(path)
+		require.NoError(t, err)
+		writer, err := windows.CreateFile(encoded, windows.GENERIC_WRITE,
+			windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+			nil, windows.OPEN_EXISTING,
+			windows.FILE_FLAG_OPEN_REPARSE_POINT|windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, windows.CloseHandle(writer)) })
+	}
 
-	_, err = pinWindowsConfigParent(filepath.Join(parent, "config.toml"))
+	// A writer in a shared ancestor, such as the temp root, must not block
+	// an edit, whether the config directory exists or still has to be made.
+	openWriter(ancestor)
+	for _, path := range []string{
+		filepath.Join(parent, "config.toml"),
+		filepath.Join(ancestor, "missing", "config.toml"),
+	} {
+		snapshot, err := ReadConfigFile(path)
+		require.NoError(t, err)
+		_, err = EditConfigFile(path, snapshot.ETag, []Edit{{Key: "web.theme", Value: "dark"}})
+		require.NoError(t, err)
+		assert.Contains(t, string(mustReadFile(t, path)), "dark")
+	}
+
+	openWriter(parent)
+	_, err := pinWindowsConfigParent(filepath.Join(parent, "config.toml"))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, windows.ERROR_SHARING_VIOLATION)
 }
